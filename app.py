@@ -1,13 +1,13 @@
 import pandas as pd
 import numpy as np
-from itertools import combinations
+from itertools import combinations, islice
 from multiprocessing import Pool, cpu_count
 from tqdm import tqdm
 
 # Load the summit data
 df = pd.read_csv('summitsfiltered.csv')
 
-# Convert latitude and longitude to radians (for faster calculations)
+# Convert latitude and longitude to radians for faster calculations
 df['Latitude_rad'] = np.radians(df['Latitude'])
 df['Longitude_rad'] = np.radians(df['Longitude'])
 
@@ -25,10 +25,16 @@ latitudes = df['Latitude_rad'].to_numpy()
 longitudes = df['Longitude_rad'].to_numpy()
 summit_codes = df['SummitCode'].to_numpy()
 
-# Generate summit index combinations in chunks to avoid memory issues
-summit_pairs = list(combinations(range(len(df)), 2))
+# Function to generate summit combinations in chunks to prevent memory overflow
+def chunked_combinations(iterable, chunk_size):
+    iterator = iter(combinations(iterable, 2))
+    while True:
+        chunk = list(islice(iterator, chunk_size))
+        if not chunk:
+            break
+        yield chunk
 
-# Function to compute distances for a subset of summit pairs
+# Function to compute distances for a chunk of summit pairs
 def compute_distances(pair_chunk):
     results = []
     for i, j in pair_chunk:
@@ -36,27 +42,24 @@ def compute_distances(pair_chunk):
         results.append((summit_codes[i], summit_codes[j], round(dist, 2)))
     return results
 
-# Split summit pairs into manageable chunks based on CPU count
+# Define chunk size (adjust based on memory availability)
+chunk_size = 100000  # Process 100,000 summit pairs at a time
+
+# Use multiprocessing for faster computation
 num_workers = cpu_count()
-chunk_size = len(summit_pairs) // num_workers
 
-# Use multiprocessing to speed up computations
+# Create a multiprocessing pool to process chunks
 with Pool(num_workers) as pool:
-    results = list(
-        tqdm(
-            pool.imap(compute_distances, [summit_pairs[i:i + chunk_size] for i in range(0, len(summit_pairs), chunk_size)]),
-            total=num_workers,
-            desc="Calculating summit distances"
-        )
-    )
+    results = []
+    for chunk_result in tqdm(pool.imap(compute_distances, chunked_combinations(range(len(df)), chunk_size)),
+                             total=(len(df) * (len(df) - 1) // 2) // chunk_size,
+                             desc="Calculating summit distances"):
+        results.extend(chunk_result)
 
-# Flatten results from parallel processing
-flat_results = [item for sublist in results for item in sublist]
-
-# Convert results to a DataFrame
-distance_df = pd.DataFrame(flat_results, columns=['Summit1', 'Summit2', 'Distance_km'])
+# Convert results to DataFrame
+distance_df = pd.DataFrame(results, columns=['Summit1', 'Summit2', 'Distance_km'])
 
 # Sort distances in descending order and save to CSV
-distance_df.sort_values(by='Distance_km', ascending=False).to_csv('optimized_distances.csv', index=False)
+distance_df.sort_values(by='Distance_km', ascending=False).to_csv('optimized_distances_chunked.csv', index=False)
 
-print("Optimized distance calculations saved to optimized_distances.csv")
+print("Optimized distance calculations saved to optimized_distances_chunked.csv")
