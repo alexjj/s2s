@@ -1,39 +1,62 @@
 import pandas as pd
-from geopy.distance import geodesic
+import numpy as np
 from itertools import combinations
 from multiprocessing import Pool, cpu_count
 from tqdm import tqdm
 
-# Load summit data
+# Load the summit data
 df = pd.read_csv('summitsfiltered.csv')
 
-# Prepare the necessary columns for processing
-summit_data = df[['SummitCode', 'Latitude', 'Longitude']].to_dict('records')
+# Convert latitude and longitude to radians (for faster calculations)
+df['Latitude_rad'] = np.radians(df['Latitude'])
+df['Longitude_rad'] = np.radians(df['Longitude'])
 
-# Function to compute distance for a summit pair
-def compute_distance(pair):
-    summit1, summit2 = pair
-    coord1 = (summit1['Latitude'], summit1['Longitude'])
-    coord2 = (summit2['Latitude'], summit2['Longitude'])
-    distance = geodesic(coord1, coord2).kilometers
-    return summit1['SummitCode'], summit2['SummitCode'], round(distance, 2)
+# Haversine formula using NumPy
+def haversine_np(lat1, lon1, lat2, lon2):
+    R = 6371  # Radius of Earth in km
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    a = np.sin(dlat / 2.0) ** 2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2.0) ** 2
+    c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
+    return R * c
 
-# Generator function to yield summit pairs in chunks
-def summit_pairs_generator(data):
-    for pair in combinations(data, 2):  # Yield summit pairs one by one
-        yield pair
+# Convert lat/lon to arrays for efficient computation
+latitudes = df['Latitude_rad'].to_numpy()
+longitudes = df['Longitude_rad'].to_numpy()
+summit_codes = df['SummitCode'].to_numpy()
 
-# Process summit pairs in chunks using multiprocessing
-def process_in_chunks():
-    with Pool(cpu_count()) as pool:
-        # Use tqdm to show progress and map the computation function
-        results = pool.imap(compute_distance, summit_pairs_generator(summit_data), chunksize=1000)
-        with open('summit_distances_optimized_parallel.csv', 'w') as f:
-            f.write('Summit1,Summit2,Distance_km\n')  # Write header
-            for result in tqdm(results, total=(len(summit_data)*(len(summit_data)-1))//2, desc="Calculating distances"):
-                f.write(f"{result[0]},{result[1]},{result[2]}\n")
+# Generate summit index combinations in chunks to avoid memory issues
+summit_pairs = list(combinations(range(len(df)), 2))
 
-# Run the optimized processing function
-if __name__ == "__main__":
-    process_in_chunks()
-    print("Optimized parallelized distance data saved to summit_distances_optimized_parallel.csv")
+# Function to compute distances for a subset of summit pairs
+def compute_distances(pair_chunk):
+    results = []
+    for i, j in pair_chunk:
+        dist = haversine_np(latitudes[i], longitudes[i], latitudes[j], longitudes[j])
+        results.append((summit_codes[i], summit_codes[j], round(dist, 2)))
+    return results
+
+# Split summit pairs into manageable chunks based on CPU count
+num_workers = cpu_count()
+chunk_size = len(summit_pairs) // num_workers
+
+# Use multiprocessing to speed up computations
+with Pool(num_workers) as pool:
+    results = list(
+        tqdm(
+            pool.imap(compute_distances, [summit_pairs[i:i + chunk_size] for i in range(0, len(summit_pairs), chunk_size)]),
+            total=num_workers,
+            desc="Calculating summit distances"
+        )
+    )
+
+# Flatten results from parallel processing
+flat_results = [item for sublist in results for item in sublist]
+
+# Convert results to a DataFrame
+distance_df = pd.DataFrame(flat_results, columns=['Summit1', 'Summit2', 'Distance_km'])
+
+# Sort distances in descending order and save to CSV
+distance_df.sort_values(by='Distance_km', ascending=False).to_csv('optimized_distances.csv', index=False)
+
+print("Optimized distance calculations saved to optimized_distances.csv")
