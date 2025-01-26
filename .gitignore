@@ -1,5 +1,4 @@
 /.venv
 summit_distances_optimized_parallel*
 *.db*
-*.csv
 *.txt
