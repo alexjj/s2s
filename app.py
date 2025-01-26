@@ -11,19 +11,31 @@ df = pd.read_csv('summitsfiltered.csv')
 # Convert latitude and longitude to radians for faster calculations
 df['Latitude_rad'] = np.radians(df['Latitude'])
 df['Longitude_rad'] = np.radians(df['Longitude'])
+df['Altitude_km'] = df['AltM'] / 1000  # Convert altitude to kilometers
 
-# Haversine formula using NumPy for great-circle distance calculation
-def haversine_np(lat1, lon1, lat2, lon2):
-    R = 6371  # Radius of Earth in km
+# Constants for WGS-84 ellipsoid
+a = 6378.1370  # Equatorial radius in km
+b = 6356.7523  # Polar radius in km
+
+def geocentric_radius(lat):
+    lat_rad = np.radians(lat)
+    return np.sqrt(((a**2 * np.cos(lat_rad))**2 + (b**2 * np.sin(lat_rad))**2) /
+                   ((a * np.cos(lat_rad))**2 + (b * np.sin(lat_rad))**2))
+
+# Modified Haversine formula to include altitude and Earth's shape
+def haversine_with_altitude(lat1, lon1, alt1, lat2, lon2, alt2):
+    R1 = geocentric_radius(np.degrees(lat1)) + alt1
+    R2 = geocentric_radius(np.degrees(lat2)) + alt2
     dlat = lat2 - lat1
     dlon = lon2 - lon1
     a = np.sin(dlat / 2.0) ** 2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2.0) ** 2
     c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
-    return R * c
+    return np.sqrt(R1**2 + R2**2 - 2 * R1 * R2 * np.cos(c))
 
-# Convert lat/lon to arrays for efficient computation
+# Convert lat/lon/alt to arrays for efficient computation
 latitudes = df['Latitude_rad'].to_numpy()
 longitudes = df['Longitude_rad'].to_numpy()
+altitudes = df['Altitude_km'].to_numpy()
 summit_codes = df['SummitCode'].to_numpy()
 
 # Function to generate summit combinations in chunks to prevent memory overflow
@@ -43,7 +55,8 @@ def compute_distances_and_write(pair_chunk):
 
     data = []
     for i, j in pair_chunk:
-        dist = haversine_np(latitudes[i], longitudes[i], latitudes[j], longitudes[j])
+        dist = haversine_with_altitude(latitudes[i], longitudes[i], altitudes[i],
+                                       latitudes[j], longitudes[j], altitudes[j])
         data.append((summit_codes[i], summit_codes[j], round(dist, 2)))
 
     cursor.executemany("INSERT INTO distances (Summit1, Summit2, Distance_km) VALUES (?, ?, ?)", data)
