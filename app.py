@@ -6,7 +6,7 @@ from multiprocessing import Pool, cpu_count
 from tqdm import tqdm
 
 # Load the summit data
-df = pd.read_csv('summitsfiltered.csv')
+df = pd.read_csv('allsummits.csv')
 
 # Convert latitude and longitude to radians for faster calculations
 df['Latitude_rad'] = np.radians(df['Latitude'])
