@@ -47,32 +47,25 @@ def calculate_arc_length(lat1, lon1, alt1, lat2, lon2, alt2):
 
     return arc_length
 
-# Main script to load summits and calculate pairwise arc lengths
+# Main script to load pairwise summits and calculate arc lengths
 if __name__ == "__main__":
-    # Load summits from the CSV file
-    file_path = 'allsummits.csv'
-    summits = pd.read_csv(file_path)
-
-    # Ensure the file has the required columns
-    required_columns = {'Latitude', 'Longitude', 'AltM', 'SummitCode'}
-    if not required_columns.issubset(summits.columns):
-        raise ValueError(f"The file must contain the following columns: {required_columns}")
-
-    # Output file path
-    output_path = 'summit_distances.csv'
+    input_file = 'pairwise_summits.csv'
+    output_file = 'summit_distances.csv'
+    chunk_size = 10000
 
     # Open the output file for writing
-    with open(output_path, mode='w', newline='') as csvfile:
+    with open(output_file, mode='w', newline='') as csvfile:
         csvwriter = csv.writer(csvfile)
-
-        # Write the header
         csvwriter.writerow(['Summit 1', 'Summit 2', 'Arc Length (m)'])
 
-        # Calculate pairwise arc lengths and write them to the file
-        for (i, summit1), (j, summit2) in combinations(summits.iterrows(), 2):
-            lat1, lon1, alt1, name1 = summit1[1]['Latitude'], summit1[1]['Longitude'], summit1[1]['AltM'], summit1[1]['SummitCode']
-            lat2, lon2, alt2, name2 = summit2[1]['Latitude'], summit2[1]['Longitude'], summit2[1]['AltM'], summit2[1]['SummitCode']
-            arc_length = calculate_arc_length(lat1, lon1, alt1, lat2, lon2, alt2)
-            csvwriter.writerow([name1, name2, arc_length])
+        # Load the pairwise summits in chunks
+        for chunk in pd.read_csv(input_file, chunksize=chunk_size):
+            results = []
+            for _, row in chunk.iterrows():
+                lat1, lon1, alt1 = row['lat1'], row['lon1'], row['alt1']
+                lat2, lon2, alt2 = row['lat2'], row['lon2'], row['alt2']
+                arc_length = calculate_arc_length(lat1, lon1, alt1, lat2, lon2, alt2)
+                results.append([row['summit1'], row['summit2'], arc_length])
+            csvwriter.writerows(results)
 
-    print(f"Pairwise arc lengths have been saved to {output_path}")
+    print(f"Arc lengths have been saved to {output_file}")
